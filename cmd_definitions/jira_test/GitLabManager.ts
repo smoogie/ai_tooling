@@ -23,6 +23,7 @@ export class GitLabManager {
     private config: GitLabConfig;
     private tempDir: string = 'temp_git';
     private gitlab: InstanceType<typeof Gitlab>;
+    private defaultBranch: string = 'main'; // Default to 'main', will be updated if needed
 
     constructor() {
         // Validate required environment variables
@@ -60,6 +61,9 @@ export class GitLabManager {
             // Clone the repository
             await this.cloneRepository();
             
+            // Detect the default branch
+            await this.detectDefaultBranch();
+            
             // Create and checkout the branch
             await this.createBranch(mrInfo.branchName);
             
@@ -84,6 +88,46 @@ export class GitLabManager {
             console.error('Error in GitLab operations:', error);
             this.cleanup();
             throw error;
+        }
+    }
+
+    private async detectDefaultBranch(): Promise<void> {
+        console.log('Detecting default branch...');
+        
+        try {
+            // First try to get the default branch from the remote
+            const result = execSync('git remote show origin', { cwd: this.tempDir }).toString();
+            const match = result.match(/HEAD branch: (.*)/);
+            
+            if (match && match[1]) {
+                this.defaultBranch = match[1].trim();
+                console.log(`Default branch detected: ${this.defaultBranch}`);
+                return;
+            }
+            
+            // If that fails, try to determine from local branches
+            const branches = execSync('git branch -a', { cwd: this.tempDir }).toString();
+            
+            // Check for main branch
+            if (branches.includes('remotes/origin/main')) {
+                this.defaultBranch = 'main';
+                console.log('Default branch set to: main');
+                return;
+            }
+            
+            // Check for master branch
+            if (branches.includes('remotes/origin/master')) {
+                this.defaultBranch = 'master';
+                console.log('Default branch set to: master');
+                return;
+            }
+            
+            // If we can't determine, log a warning but continue with default
+            console.log('Warning: Could not determine default branch, using "main" as fallback');
+            
+        } catch (error) {
+            console.error('Error detecting default branch:', error);
+            console.log('Using default branch: main');
         }
     }
 
@@ -167,6 +211,12 @@ export class GitLabManager {
                 console.log(`Looking up project directly: ${this.config.repoName}`);
                 project = await this.gitlab.Projects.show(this.config.repoName);
                 console.log(`Project found directly: ${project.name} (ID: ${project.id})`);
+                
+                // Update default branch from project info if available
+                if (project.default_branch) {
+                    this.defaultBranch = project.default_branch;
+                    console.log(`Default branch from project: ${this.defaultBranch}`);
+                }
             } catch (directError) {
                 console.log(`Direct lookup failed: ${directError.message}`);
                 
@@ -195,6 +245,12 @@ export class GitLabManager {
                 
                 if (project) {
                     console.log(`Project found via search: ${project.name} (ID: ${project.id})`);
+                    
+                    // Update default branch from project info if available
+                    if (project.default_branch) {
+                        this.defaultBranch = project.default_branch;
+                        console.log(`Default branch from project: ${this.defaultBranch}`);
+                    }
                 }
             }
             
@@ -203,11 +259,11 @@ export class GitLabManager {
             }
 
             // Create the merge request
-            console.log(`Creating merge request for project ID: ${project.id}`);
+            console.log(`Creating merge request for project ID: ${project.id} targeting branch: ${this.defaultBranch}`);
             const mergeRequest = await this.gitlab.MergeRequests.create(
                 project.id,
                 mrInfo.branchName,
-                'master',
+                this.defaultBranch,
                 mrInfo.title,
                 {
                     description: mrInfo.description,
