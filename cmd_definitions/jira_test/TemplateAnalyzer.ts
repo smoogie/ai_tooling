@@ -38,6 +38,8 @@ Rules:
 9. Only include the JSON response, no additional text
 10. Do not include any markdown formatting or backticks in the response
 
+Ticket Key: {{TICKET_KEY}}
+
 Ticket Description to Analyze:
 `;
 
@@ -69,9 +71,10 @@ Ticket Description to Analyze:
         return cleaned.trim();
     }
 
-    public async analyzeTicketDescription(description: string): Promise<TemplateAnalysis> {
+    public async analyzeTicketDescription(description: string, ticketKey: string): Promise<TemplateAnalysis> {
         try {
-            const prompt = TemplateAnalyzer.ANALYSIS_PROMPT + description;
+            const prompt = TemplateAnalyzer.ANALYSIS_PROMPT
+                .replace('{{TICKET_KEY}}', ticketKey) + description;
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
             const text = response.text();
@@ -88,6 +91,11 @@ Ticket Description to Analyze:
                     !analysis.mergeRequestTitle || !analysis.mergeRequestDescription || 
                     !analysis.branchName || !analysis.commitMessage) {
                     throw new Error('Invalid template analysis response: missing required fields');
+                }
+
+                // Ensure the branch name starts with the ticket key
+                if (!analysis.branchName.toLowerCase().startsWith(ticketKey.toLowerCase())) {
+                    analysis.branchName = `${ticketKey.toLowerCase()}-${analysis.branchName.toLowerCase()}`;
                 }
 
                 return analysis;

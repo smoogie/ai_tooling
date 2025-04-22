@@ -44,7 +44,7 @@ export async function handleCommand(options: any) {
         if (issue.fields.description) {
             console.log('\n=== TEMPLATE ANALYSIS ===');
             console.log('Analyzing template requirements...');
-            const templateAnalysis = await templateAnalyzer.analyzeTicketDescription(issue.fields.description);
+            const templateAnalysis = await templateAnalyzer.analyzeTicketDescription(issue.fields.description, issue.key);
             
             console.log('\n--- Template Information ---');
             console.log(`Template Name: ${templateAnalysis.templateName}`);

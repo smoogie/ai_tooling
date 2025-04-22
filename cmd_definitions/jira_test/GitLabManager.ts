@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import { Gitlab } from '@gitbeaker/rest';
 
 dotenv.config();
 
@@ -21,13 +22,31 @@ interface MergeRequestInfo {
 export class GitLabManager {
     private config: GitLabConfig;
     private tempDir: string = 'temp_git';
+    private gitlab: InstanceType<typeof Gitlab>;
 
     constructor() {
+        // Validate required environment variables
+        if (!process.env.GITLAB_TOKEN) {
+            throw new Error('GITLAB_TOKEN environment variable is required');
+        }
+        
+        if (!process.env.REPO_NAME) {
+            throw new Error('REPO_NAME environment variable is required');
+        }
+        
         this.config = {
-            token: process.env.GITLAB_TOKEN || '',
+            token: process.env.GITLAB_TOKEN,
             baseUrl: process.env.GITLAB_BASE_URL || 'https://gitlab.com',
-            repoName: process.env.REPO_NAME || ''
+            repoName: process.env.REPO_NAME
         };
+        
+        console.log(`Initializing GitLab client with base URL: ${this.config.baseUrl}`);
+        console.log(`Target repository: ${this.config.repoName}`);
+        
+        this.gitlab = new Gitlab({
+            host: this.config.baseUrl,
+            token: this.config.token
+        });
     }
 
     public async createTemplateAndMergeRequest(
@@ -71,16 +90,25 @@ export class GitLabManager {
     private async cloneRepository(): Promise<void> {
         console.log('Cloning repository...');
         
-        // Remove temp directory if it exists
-        if (fs.existsSync(this.tempDir)) {
-            fs.rmSync(this.tempDir, { recursive: true, force: true });
+        try {
+            // Remove temp directory if it exists
+            if (fs.existsSync(this.tempDir)) {
+                console.log(`Removing existing temp directory: ${this.tempDir}`);
+                fs.rmSync(this.tempDir, { recursive: true, force: true });
+            }
+            
+            // Construct the repository URL
+            const repoUrl = `https://oauth2:${this.config.token}@${this.config.baseUrl.replace('https://', '')}/${this.config.repoName}.git`;
+            console.log(`Cloning from: ${this.config.baseUrl}/${this.config.repoName}`);
+            
+            // Clone the repository
+            execSync(`git clone ${repoUrl} ${this.tempDir}`, { stdio: 'inherit' });
+            
+            console.log('Repository cloned successfully');
+        } catch (error) {
+            console.error('Error cloning repository:', error);
+            throw new Error(`Failed to clone repository: ${error.message}. Please check your GITLAB_TOKEN and REPO_NAME.`);
         }
-        
-        // Clone the repository
-        const repoUrl = `https://oauth2:${this.config.token}@${this.config.baseUrl.replace('https://', '')}/${this.config.repoName}.git`;
-        execSync(`git clone ${repoUrl} ${this.tempDir}`, { stdio: 'inherit' });
-        
-        console.log('Repository cloned successfully');
     }
 
     private async createBranch(branchName: string): Promise<void> {
@@ -130,31 +158,88 @@ export class GitLabManager {
     private async createMergeRequest(mrInfo: MergeRequestInfo): Promise<void> {
         console.log('Creating merge request...');
         
-        // For now, we'll just print instructions for creating a merge request
-        // In a real implementation, you would use the GitLab API or CLI
-        console.log('\nTo create a merge request, please follow these steps:');
-        console.log(`1. Go to ${this.config.baseUrl}/${this.config.repoName}/merge_requests/new`);
-        console.log(`2. Set source branch to: ${mrInfo.branchName}`);
-        console.log(`3. Set title to: ${mrInfo.title}`);
-        console.log(`4. Set description to: ${mrInfo.description}`);
-        console.log('5. Click "Create merge request"');
-        
-        // In a future implementation, you could use the GitLab API or CLI to create the MR
-        // For example, if you have the GitLab CLI installed:
-        // execSync(`glab mr create --title "${mrInfo.title}" --description "${mrInfo.description}" --source-branch ${mrInfo.branchName}`, { stdio: 'inherit' });
+        try {
+            // Get the project ID - try multiple approaches
+            let project;
+            
+            // First try: Direct project lookup by path
+            try {
+                console.log(`Looking up project directly: ${this.config.repoName}`);
+                project = await this.gitlab.Projects.show(this.config.repoName);
+                console.log(`Project found directly: ${project.name} (ID: ${project.id})`);
+            } catch (directError) {
+                console.log(`Direct lookup failed: ${directError.message}`);
+                
+                // Second try: Search for projects and find by path
+                console.log(`Searching for projects with name: ${this.config.repoName}`);
+                const projects = await this.gitlab.Projects.all({
+                    search: this.config.repoName.split('/').pop() || this.config.repoName,
+                    membership: true,
+                    perPage: 100
+                });
+                
+                // Try to find the exact match first
+                project = projects.find(p => p.path_with_namespace === this.config.repoName);
+                
+                // If no exact match, try to find a partial match
+                if (!project) {
+                    const repoNameParts = this.config.repoName.split('/');
+                    const lastPart = repoNameParts[repoNameParts.length - 1];
+                    
+                    project = projects.find(p => 
+                        p.path_with_namespace === this.config.repoName || 
+                        p.path === lastPart || 
+                        p.name === lastPart
+                    );
+                }
+                
+                if (project) {
+                    console.log(`Project found via search: ${project.name} (ID: ${project.id})`);
+                }
+            }
+            
+            if (!project) {
+                throw new Error(`Project ${this.config.repoName} not found. Please check your GITLAB_TOKEN and REPO_NAME environment variables.`);
+            }
+
+            // Create the merge request
+            console.log(`Creating merge request for project ID: ${project.id}`);
+            const mergeRequest = await this.gitlab.MergeRequests.create(
+                project.id,
+                mrInfo.branchName,
+                'master',
+                mrInfo.title,
+                {
+                    description: mrInfo.description,
+                    removeSourceBranch: true
+                }
+            );
+
+            console.log(`Merge request created successfully!`);
+            console.log(`URL: ${mergeRequest.web_url}`);
+            
+        } catch (error) {
+            console.error('Error creating merge request:', error);
+            throw error;
+        }
     }
 
     private cleanup(): void {
         console.log('Cleaning up...');
         
-        // Change back to the original directory
-        process.chdir('..');
-        
-        // Remove temp directory
-        if (fs.existsSync(this.tempDir)) {
-            fs.rmSync(this.tempDir, { recursive: true, force: true });
+        try {
+            // Change back to the original directory
+            process.chdir('..');
+            
+            // Remove temp directory
+            if (fs.existsSync(this.tempDir)) {
+                fs.rmSync(this.tempDir, { recursive: true, force: true });
+            }
+            
+            console.log('Cleanup completed');
+        } catch (error) {
+            console.error('Error during cleanup:', error);
+            throw error;
         }
-        
-        console.log('Cleanup completed');
     }
-} 
+}
