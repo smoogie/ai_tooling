@@ -1,0 +1,20 @@
+# Google Gemini Configuration
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-2.0-flash
+GEMINI_EMBEDDING_MODEL=embedding-001
+
+
+# Jira Configuration
+JIRA_TOKEN=your-jira-token
+JIRA_BASE_URL="boozt.atlassian.net"
+JIRA_USERNAME=your-jira-username
+
+#anthropic configuration
+ANTHROPIC_API_KEY=your-anthropic-api-key
+ANTHROPIC_MODEL="claude-3-5-sonnet-20240620"
+
+
+# gitlab configuration
+GITLAB_TOKEN=your-gitlab-token
+GITLAB_BASE_URL="https://gitlab.com"
+REPO_NAME=your-gitlab-repo-name

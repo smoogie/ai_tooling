@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "@google/generative-ai": "^0.2.1",
+    "dotenv": "^16.5.0",
+    "path": "^0.12.7",
+    "uuid": "^11.0.3",
+    "ws": "^8.18.1",
+    "commander": "^12.1.0",
+    "jira-client": "^3.0.0",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@gitbeaker/rest": "^42.4.0"
+  }
+}
